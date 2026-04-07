@@ -87,6 +87,12 @@ extract_score() {
     return 0
   fi
 
+  score="$(sed -nE 's/.*(Health Score|Overall)[^0-9]*([0-9]+)[[:space:]]*\/[[:space:]]*100.*/\2/p' "$file" | head -1)"
+  if [ -n "$score" ]; then
+    printf '%s\n' "$score"
+    return 0
+  fi
+
   return 1
 }
 
