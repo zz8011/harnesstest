@@ -57,6 +57,24 @@ extract_score() {
     return 0
   fi
 
+  score="$(sed -nE 's/^\*\*Health Score: ([0-9]+)\/100\*\*$/\1/p' "$file" | head -1)"
+  if [ -n "$score" ]; then
+    printf '%s\n' "$score"
+    return 0
+  fi
+
+  score="$(sed -nE 's/^- \*\*Health score:\*\* ([0-9]+)\/100$/\1/p' "$file" | head -1)"
+  if [ -n "$score" ]; then
+    printf '%s\n' "$score"
+    return 0
+  fi
+
+  score="$(sed -nE 's/^\| \*\*Overall\*\* \| \*\*([0-9]+)\*\* \|$/\1/p' "$file" | head -1)"
+  if [ -n "$score" ]; then
+    printf '%s\n' "$score"
+    return 0
+  fi
+
   return 1
 }
 
