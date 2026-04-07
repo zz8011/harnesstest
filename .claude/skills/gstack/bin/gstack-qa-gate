@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# gstack-qa-gate — compare QA health scores and fail when quality drops
+#
+# Usage:
+#   gstack-qa-gate --baseline .gstack/qa-baseline.json \
+#     --current .gstack/qa-reports/baseline.json
+#
+# Accepts either baseline JSON (`"healthScore": 82`) or QA report markdown
+# (`## Health Score: 82/100`).
+set -euo pipefail
+
+BASELINE=""
+CURRENT=""
+MAX_DROP="0"
+ALLOW_MISSING_BASELINE="0"
+FORMAT="text"
+
+usage() {
+  cat >&2 <<'EOF'
+Usage: gstack-qa-gate --baseline <file> --current <file> [options]
+
+Options:
+  --max-drop <N>               Allow current score to drop by up to N points (default: 0)
+  --allow-missing-baseline     Succeed when the baseline file does not exist
+  --format text|json           Output format (default: text)
+EOF
+}
+
+is_int() {
+  case "${1:-}" in
+    ''|*[!0-9-]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+extract_score() {
+  local file="$1"
+  local score
+
+  [ -f "$file" ] || return 1
+
+  score="$(sed -nE 's/.*"healthScore"[[:space:]]*:[[:space:]]*([0-9]+).*/\1/p' "$file" | head -1)"
+  if [ -n "$score" ]; then
+    printf '%s\n' "$score"
+    return 0
+  fi
+
+  score="$(sed -nE 's/^## Health Score: ([0-9]+)\/100$/\1/p' "$file" | head -1)"
+  if [ -n "$score" ]; then
+    printf '%s\n' "$score"
+    return 0
+  fi
+
+  return 1
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --baseline) BASELINE="${2:-}"; shift 2 ;;
+    --current) CURRENT="${2:-}"; shift 2 ;;
+    --max-drop) MAX_DROP="${2:-}"; shift 2 ;;
+    --allow-missing-baseline) ALLOW_MISSING_BASELINE="1"; shift ;;
+    --format) FORMAT="${2:-}"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "$BASELINE" ] || [ -z "$CURRENT" ]; then
+  usage
+  exit 2
+fi
+
+if ! is_int "$MAX_DROP"; then
+  echo "--max-drop must be a non-negative integer" >&2
+  exit 2
+fi
+
+case "$FORMAT" in
+  text|json) ;;
+  *)
+    echo "--format must be text or json" >&2
+    exit 2
+    ;;
+esac
+
+if [ ! -f "$BASELINE" ]; then
+  if [ "$ALLOW_MISSING_BASELINE" = "1" ]; then
+    if [ "$FORMAT" = "json" ]; then
+      printf '{"status":"skipped","reason":"missing_baseline","baseline":null,"current":null,"delta":null}\n'
+    else
+      printf 'QA gate skipped: baseline file not found (%s)\n' "$BASELINE"
+    fi
+    exit 0
+  fi
+
+  echo "Baseline file not found: $BASELINE" >&2
+  exit 2
+fi
+
+if [ ! -f "$CURRENT" ]; then
+  echo "Current QA result file not found: $CURRENT" >&2
+  exit 2
+fi
+
+if ! BASELINE_SCORE="$(extract_score "$BASELINE")"; then
+  echo "Could not extract health score from baseline file: $BASELINE" >&2
+  exit 2
+fi
+
+if ! CURRENT_SCORE="$(extract_score "$CURRENT")"; then
+  echo "Could not extract health score from current file: $CURRENT" >&2
+  exit 2
+fi
+
+DELTA=$((CURRENT_SCORE - BASELINE_SCORE))
+DROP=$((BASELINE_SCORE - CURRENT_SCORE))
+STATUS="pass"
+EXIT_CODE=0
+
+if [ "$DROP" -gt "$MAX_DROP" ]; then
+  STATUS="fail"
+  EXIT_CODE=1
+fi
+
+if [ "$FORMAT" = "json" ]; then
+  printf '{"status":"%s","baseline":%s,"current":%s,"delta":%s,"max_drop":%s}\n' \
+    "$STATUS" "$BASELINE_SCORE" "$CURRENT_SCORE" "$DELTA" "$MAX_DROP"
+else
+  SIGN="+"
+  if [ "$DELTA" -lt 0 ]; then
+    SIGN=""
+  fi
+
+  printf 'QA gate: baseline %s, current %s, delta %s%s\n' \
+    "$BASELINE_SCORE" "$CURRENT_SCORE" "$SIGN" "$DELTA"
+
+  if [ "$EXIT_CODE" -eq 0 ]; then
+    printf 'PASS: health score did not drop beyond the allowed threshold (%s)\n' "$MAX_DROP"
+  else
+    printf 'FAIL: health score dropped by %s points (allowed %s)\n' "$DROP" "$MAX_DROP" >&2
+  fi
+fi
+
+exit "$EXIT_CODE"

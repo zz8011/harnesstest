@@ -1,0 +1,123 @@
+name: QA Gate
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Simplest setup: define QA_TARGET_URL as a repository variable that points
+  # to a stable preview or staging environment.
+  QA_TARGET_URL: ${{ vars.QA_TARGET_URL }}
+  GSTACK_CLAUDE_CMD: claude
+  # Optional Anthropic-compatible gateway config for Claude Code in CI.
+  ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL }}
+  ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+  ANTHROPIC_DEFAULT_HAIKU_MODEL: ${{ vars.ANTHROPIC_DEFAULT_HAIKU_MODEL }}
+  ANTHROPIC_DEFAULT_OPUS_MODEL: ${{ vars.ANTHROPIC_DEFAULT_OPUS_MODEL }}
+  ANTHROPIC_DEFAULT_SONNET_MODEL: ${{ vars.ANTHROPIC_DEFAULT_SONNET_MODEL }}
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: ${{ vars.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC }}
+
+jobs:
+  qa:
+    if: ${{ vars.QA_TARGET_URL != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Validate Claude auth config
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+        run: |
+          if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "Using ANTHROPIC_API_KEY from GitHub Actions secrets."
+            exit 0
+          fi
+
+          if [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ] && [ -n "${ANTHROPIC_BASE_URL:-}" ]; then
+            echo "Using Anthropic-compatible auth token + base URL from GitHub Actions."
+            exit 0
+          fi
+
+          echo "Missing Claude auth configuration."
+          echo "Set secrets.ANTHROPIC_API_KEY for direct Anthropic access,"
+          echo "or set secrets.ANTHROPIC_AUTH_TOKEN plus vars.ANTHROPIC_BASE_URL"
+          echo "for an Anthropic-compatible gateway."
+          exit 1
+
+      - name: Build vendored gstack
+        run: |
+          test -d .claude/skills/gstack || {
+            echo "Missing vendored gstack at .claude/skills/gstack"
+            echo "Vendor gstack into the repo before enabling this workflow."
+            exit 1
+          }
+          cd .claude/skills/gstack
+          ./setup
+
+      - name: Prepare baseline
+        run: |
+          mkdir -p .gstack/qa-reports
+          BASE_REF="${GITHUB_BASE_REF:-main}"
+          BASELINE_TMP=$(mktemp)
+          if git show "origin/${BASE_REF}:.gstack/qa-baseline.json" > "$BASELINE_TMP" 2>/dev/null; then
+            mv "$BASELINE_TMP" .gstack/qa-baseline.json
+            echo "Loaded baseline from ${BASE_REF}"
+          else
+            rm -f "$BASELINE_TMP" .gstack/qa-baseline.json
+            echo "No committed .gstack/qa-baseline.json found on ${BASE_REF}"
+          fi
+
+      - name: Run /qa
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+        run: |
+          cat > /tmp/qa-prompt.txt <<EOF
+          B=".claude/skills/gstack/browse/dist/browse"
+
+          Read the file .claude/skills/gstack/qa/SKILL.md for the QA workflow instructions.
+          Skip the preamble bash block, lake intro, telemetry, and contributor mode sections — go straight to the QA workflow.
+
+          Run a Quick QA test on ${QA_TARGET_URL}
+          Do NOT use AskUserQuestion.
+          Write your report to .gstack/qa-reports/qa-report-ci.md
+          EOF
+
+          "${GSTACK_CLAUDE_CMD}" -p \
+            --dangerously-skip-permissions \
+            --max-turns 60 \
+            < /tmp/qa-prompt.txt
+
+      - name: Enforce QA gate
+        run: |
+          .claude/skills/gstack/bin/gstack-qa-gate \
+            --baseline .gstack/qa-baseline.json \
+            --current .gstack/qa-reports/baseline.json \
+            --allow-missing-baseline
+
+      - name: Upload QA artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-artifacts
+          path: |
+            .gstack/qa-reports/**
+            .gstack/qa-baseline.json
+          retention-days: 14
