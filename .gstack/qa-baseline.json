@@ -1,0 +1,19 @@
+{
+  "date": "2026-04-07",
+  "url": "https://v.renchengzhang.com/",
+  "healthScore": 92,
+  "issues": [
+    {"id": "ISSUE-001", "title": "External link to heading fragment may be invalid", "severity": "high", "category": "links"},
+    {"id": "ISSUE-002", "title": "Tab transition timeout", "severity": "medium", "category": "functional"}
+  ],
+  "categoryScores": {
+    "console": 100,
+    "links": 90,
+    "visual": 95,
+    "functional": 95,
+    "ux": 90,
+    "performance": 90,
+    "content": 95,
+    "accessibility": 90
+  }
+}

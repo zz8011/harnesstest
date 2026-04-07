@@ -2826,7 +2826,7 @@ Recommended minimum path:
 2. Mirror any required Claude CLI env into GitHub repo secrets/vars before running the workflow
 3. Adapt only the target URL source, timeout, and any repo-specific setup needed before QA
 4. Keep the QA run in **Quick** mode first; do not start with Exhaustive CI runs
-5. Compare the current run's \`.gstack/qa-reports/baseline.json\` against a committed base-branch baseline file such as \`.gstack/qa-baseline.json\`
+5. Compare a committed base-branch baseline file such as \`.gstack/qa-baseline.json\` against the current CI QA output (for example \`.gstack/qa-reports/qa-report-ci.md\`)
 6. Enforce the score check with \`${ctx.paths.binDir}/gstack-qa-gate\`
 7. Upload \`.gstack/qa-reports/\` as an artifact even if the gate fails
 

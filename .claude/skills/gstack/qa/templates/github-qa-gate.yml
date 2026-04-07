@@ -109,7 +109,7 @@ jobs:
         run: |
           .claude/skills/gstack/bin/gstack-qa-gate \
             --baseline .gstack/qa-baseline.json \
-            --current .gstack/qa-reports/baseline.json \
+            --current .gstack/qa-reports/qa-report-ci.md \
             --allow-missing-baseline
 
       - name: Upload QA artifacts
